@@ -2,6 +2,8 @@
 
 A Slack bot that posts leaderboards for Scrapyard events showing the events with the most new sign-ups.
 
+> **Note:** This bot was written with assistance from AI.
+
 ## Features
 
 - Posts a leaderboard in the configured Slack channel at 8am ET and 8pm ET daily
@@ -41,3 +43,7 @@ Run the bot in development mode with auto-reload:
 ```
 bun dev
 ``` 
+
+## AI Attribution
+
+This bot was primarily developed with the assistance of AI technology. The codebase, including the leaderboard logic, Slack integration, and Docker configuration, was generated with the help of Claude 3.7 Sonnet by Anthropic. Human oversight and modifications were applied to ensure functionality and security. 
