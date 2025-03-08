@@ -8,6 +8,10 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
+// Global cutoff timestamp - March 15, 2024 at 12:00 in UTC-12 (earliest timezone)
+// This is March 16, 2024 at 00:00 UTC (midnight)
+const GLOBAL_EVENT_START = new Date('2024-03-16T00:00:00Z');
+
 // Configure Slack app
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -276,9 +280,24 @@ function formatLeaderboardMessage(data) {
 }
 
 /**
+ * Checks if we've passed the global event start time
+ * @returns {boolean} True if the event has started globally
+ */
+function hasEventStartedGlobally() {
+  const now = new Date();
+  return now >= GLOBAL_EVENT_START;
+}
+
+/**
  * Posts the leaderboard to the configured Slack channel
  */
 async function postLeaderboard(channelId = process.env.SLACK_CHANNEL) {
+  // Check if the event has started globally - if so, don't post leaderboard
+  if (hasEventStartedGlobally()) {
+    console.log(`Skipping leaderboard post - the event has started globally (${new Date().toISOString()})`);
+    return;
+  }
+
   try {
     const data = await fetchLeaderboardData();
     const message = formatLeaderboardMessage(data);
@@ -448,6 +467,12 @@ async function fetchAllEventsData() {
  * Checks for milestone achievements and posts congratulatory messages
  */
 async function checkMilestones() {
+  // Check if the event has started globally - if so, don't check milestones
+  if (hasEventStartedGlobally()) {
+    console.log(`Skipping milestone check - the event has started globally (${new Date().toISOString()})`);
+    return;
+  }
+
   try {
     console.log(`Checking milestones at ${new Date().toISOString()}`);
     
@@ -582,6 +607,15 @@ async function checkMilestones() {
 app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   await ack();
   
+  // Check if the event has started globally - if so, respond with a message
+  if (hasEventStartedGlobally()) {
+    await respond({
+      response_type: 'ephemeral',
+      text: "Scrapyard has started globally. Leaderboard updates are no longer available."
+    });
+    return;
+  }
+  
   try {
     // Log the user who triggered the command
     const userId = command.user_id;
@@ -613,6 +647,14 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   // Initialize milestone database before scheduling any jobs
   await initMilestoneDb();
   
+  // Check if we're past the global event start time
+  if (hasEventStartedGlobally()) {
+    console.log(`The event has already started globally (current time: ${new Date().toISOString()})`);
+    console.log(`Global event start time was: ${GLOBAL_EVENT_START.toISOString()}`);
+    console.log('No scheduled jobs will be started.');
+    return;
+  }
+  
   // Schedule leaderboard posts at 8am and 8pm ET
   // Note: Server time should be set to ET, or TZ env var should be set to America/New_York
   const morningJob = new CronJob('0 0 8 * * *', postLeaderboard, null, true, 'America/New_York');
@@ -625,6 +667,7 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   console.log(`- Morning leaderboard: ${morningJob.nextDate().toString()}`);
   console.log(`- Evening leaderboard: ${eveningJob.nextDate().toString()}`);
   console.log(`- Milestone checks: ${milestoneJob.nextDate().toString()}`);
+  console.log(`All jobs will stop after the global event start: ${GLOBAL_EVENT_START.toISOString()}`);
   
   // Verify database connections by testing simple queries
   try {
