@@ -16,9 +16,14 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
-// Configure PostgreSQL connection manually
+// Configure PostgreSQL connection manually for the warehouse DB
 const sql = new SQL({
   url: process.env.WAREHOUSE_DB_URL
+});
+
+// Configure PostgreSQL connection for milestone tracking
+const milestoneDb = new SQL({
+  url: process.env.MILESTONE_DB_URL
 });
 
 // Define SQL query for the leaderboard
@@ -290,6 +295,289 @@ async function postLeaderboard(channelId = process.env.SLACK_CHANNEL) {
   }
 }
 
+/**
+ * Initializes the milestone database by creating the necessary table if it doesn't exist
+ */
+async function initMilestoneDb() {
+  try {
+    // Create a simpler, more intuitive table structure
+    await milestoneDb`
+      CREATE TABLE IF NOT EXISTS event_tracking (
+        event_name TEXT PRIMARY KEY,
+        event_slug TEXT,
+        last_known_count INTEGER NOT NULL,
+        last_milestone_notified INTEGER NOT NULL,
+        last_notified_at TIMESTAMP WITH TIME ZONE,
+        last_updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      )
+    `;
+    
+    console.log('Milestone database initialized');
+  } catch (error) {
+    console.error('Error initializing milestone database:', error);
+  }
+}
+
+/**
+ * Determines the next milestone for an event based on its total registrations
+ * @param {number} totalRegistrations - The total number of registrations
+ * @returns {number} The milestone this count falls into
+ */
+function getNextMilestone(totalRegistrations) {
+  if (totalRegistrations < 50) {
+    // For events with < 50 registrations, milestone every 10
+    return Math.floor(totalRegistrations / 10) * 10;
+  } else {
+    // For events with >= 50 registrations, milestone at multiples of 20
+    return Math.floor(totalRegistrations / 20) * 20;
+  }
+}
+
+/**
+ * Formats a congratulatory message for an event that reached a milestone
+ * @param {string} eventName - The name of the event
+ * @param {number} currentCount - The exact current number of signups
+ * @returns {Object} A formatted Slack message
+ */
+function formatMilestoneMessage(eventName, currentCount) {
+  let emoji;
+  
+  // Select emoji based on signup count
+  if (currentCount >= 100) {
+    emoji = "🚀";
+  } else if (currentCount >= 50) {
+    emoji = "🔥";
+  } else {
+    emoji = "🎉";
+  }
+  
+  // Simple, direct message format with the exact current count
+  const message = `*${eventName}* just hit *${currentCount} signups*!`;
+  
+  return {
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${emoji} ${message}`
+        }
+      }
+    ],
+    text: `${eventName} reached ${currentCount} signups!` // Fallback text for notifications
+  };
+}
+
+/**
+ * Fetches data for ALL events with their total signups
+ * This is used for milestone tracking to ensure we don't miss any events
+ * @returns {Promise<Array>} All events with their total signups
+ */
+async function fetchAllEventsData() {
+  try {
+    // Query to get all events and their total signups, regardless of recent activity
+    const result = await sql`
+      WITH event_signups AS (
+        SELECT
+          "Local Attendee Event Info"."event_name" AS event_name,
+          "Local Attendee Event Info"."slug" AS event_slug,
+          COUNT(DISTINCT "source"."lower_email") AS total_sign_ups
+        FROM (
+          SELECT
+            "source"."lower_email" AS "lower_email",
+            MAX("source"."email") AS "max"
+          FROM (
+            SELECT
+              "airtable_hack_club_scrapyard_appigkif7gbvisalg"."local_attendees"."email" AS "email",
+              LOWER("airtable_hack_club_scrapyard_appigkif7gbvisalg"."local_attendees"."email") AS "lower_email"
+            FROM
+              "airtable_hack_club_scrapyard_appigkif7gbvisalg"."local_attendees"
+          ) AS "source"
+          GROUP BY "source"."lower_email"
+        ) AS "source"
+        INNER JOIN "airtable_hack_club_scrapyard_appigkif7gbvisalg"."local_attendees" AS "Local Attendees - Max of Email"
+          ON "source"."max" = "Local Attendees - Max of Email"."email"
+        INNER JOIN (
+          SELECT
+            DISTINCT LOWER(a.email) AS lower_email,
+            e.name AS event_name,
+            e.slug AS slug
+          FROM
+            "airtable_hack_club_scrapyard_appigkif7gbvisalg"."local_attendees" AS a
+            LEFT JOIN "airtable_hack_club_scrapyard_appigkif7gbvisalg"."events" AS e
+              ON a.event ->> 0 = e.id
+          WHERE e.name IS NOT NULL AND e.slug IS NOT NULL
+        ) AS "Local Attendee Event Info"
+          ON "source"."lower_email" = "Local Attendee Event Info"."lower_email"
+        GROUP BY 
+          "Local Attendee Event Info"."event_name",
+          "Local Attendee Event Info"."slug"
+      )
+      SELECT
+        event_name,
+        event_slug,
+        total_sign_ups
+      FROM
+        event_signups
+      WHERE
+        event_name IS NOT NULL
+        AND total_sign_ups > 0
+      ORDER BY
+        event_name ASC
+    `;
+    
+    console.log(`Fetched data for ${result.length} events`);
+    
+    // Log the first few events to verify data is correct
+    if (result.length > 0) {
+      const sampleEvents = result.slice(0, 3);
+      console.log('Sample events:');
+      sampleEvents.forEach(event => {
+        console.log(`- ${event.event_name} (slug: ${event.event_slug}) - ${event.total_sign_ups} signups`);
+      });
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error fetching all events data:', error);
+    return [];
+  }
+}
+
+/**
+ * Checks for milestone achievements and posts congratulatory messages
+ */
+async function checkMilestones() {
+  try {
+    console.log(`Checking milestones at ${new Date().toISOString()}`);
+    
+    // Fetch ALL events data
+    const allEvents = await fetchAllEventsData();
+    
+    if (!allEvents || allEvents.length === 0) {
+      console.log('No events found for milestone checking');
+      return;
+    }
+    
+    console.log(`Processing ${allEvents.length} events for milestone checks`);
+    
+    // Process each event
+    for (const event of allEvents) {
+      // Skip events with null or empty event name
+      if (!event.event_name) {
+        console.log('Skipping event with null or empty name');
+        continue;
+      }
+      
+      const eventName = event.event_name;
+      const currentCount = event.total_sign_ups || 0;
+      const eventSlug = event.event_slug;
+      
+      // Skip events with no registrations
+      if (!currentCount) {
+        console.log(`Skipping ${eventName} with 0 signups`);
+        continue;
+      }
+      
+      // Check if we're already tracking this event
+      const existingRecord = await milestoneDb`
+        SELECT * FROM event_tracking WHERE event_name = ${eventName}
+      `;
+      
+      if (existingRecord.length === 0) {
+        // First time seeing this event - add to tracking without notification
+        const currentMilestone = getNextMilestone(currentCount);
+        
+        try {
+          await milestoneDb`
+            INSERT INTO event_tracking (
+              event_name, 
+              event_slug, 
+              last_known_count, 
+              last_milestone_notified,
+              last_notified_at,
+              last_updated_at
+            ) VALUES (
+              ${eventName},
+              ${eventSlug},
+              ${currentCount},
+              ${currentMilestone},
+              NULL,
+              NOW()
+            )
+          `;
+          
+          console.log(`Started tracking ${eventName} with ${currentCount} signups (milestone: ${currentMilestone}, slug: ${eventSlug})`);
+        } catch (insertError) {
+          console.error(`Error adding event ${eventName} to tracking:`, insertError);
+        }
+      } else {
+        // We're already tracking this event
+        const record = existingRecord[0];
+        const lastKnownCount = record.last_known_count;
+        const lastMilestoneNotified = record.last_milestone_notified;
+        
+        // Determine the current milestone
+        const currentMilestone = getNextMilestone(currentCount);
+        
+        // Check if we've crossed a new milestone threshold
+        const crossedNewMilestone = currentMilestone > lastMilestoneNotified;
+        
+        // For events with > 50 registrations, only notify if milestone is 20% higher
+        let shouldNotify = crossedNewMilestone;
+        if (lastMilestoneNotified >= 50 && crossedNewMilestone) {
+          shouldNotify = currentMilestone >= lastMilestoneNotified * 1.2;
+        }
+        
+        // Notify if we crossed a milestone
+        if (shouldNotify && currentCount >= 10) {
+          try {
+            // Post the milestone message with the EXACT current count, not the milestone
+            const message = formatMilestoneMessage(eventName, currentCount);
+            
+            await app.client.chat.postMessage({
+              channel: process.env.SLACK_CHANNEL,
+              ...message
+            });
+            
+            console.log(`Posted milestone for ${eventName}: ${currentCount} signups (crossed milestone: ${currentMilestone})`);
+            
+            // Update our tracking record with the new milestone and always update the slug
+            await milestoneDb`
+              UPDATE event_tracking 
+              SET 
+                last_known_count = ${currentCount},
+                last_milestone_notified = ${currentMilestone},
+                event_slug = ${eventSlug},
+                last_notified_at = NOW(),
+                last_updated_at = NOW()
+              WHERE event_name = ${eventName}
+            `;
+          } catch (updateError) {
+            console.error(`Error updating milestone for ${eventName}:`, updateError);
+          }
+        } else if (currentCount !== lastKnownCount) {
+          try {
+            // Just update the count and slug
+            await milestoneDb`
+              UPDATE event_tracking 
+              SET 
+                last_known_count = ${currentCount},
+                event_slug = ${eventSlug},
+                last_updated_at = NOW()
+              WHERE event_name = ${eventName}
+            `;
+          } catch (updateError) {
+            console.error(`Error updating count for ${eventName}:`, updateError);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error checking milestones:', error);
+  }
+}
+
 // Register slash command handler
 app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   await ack();
@@ -322,20 +610,34 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   await app.start();
   console.log('⚡️ Scrapyard Leaderboard Bot is running!');
   
+  // Initialize milestone database before scheduling any jobs
+  await initMilestoneDb();
+  
   // Schedule leaderboard posts at 8am and 8pm ET
   // Note: Server time should be set to ET, or TZ env var should be set to America/New_York
   const morningJob = new CronJob('0 0 8 * * *', postLeaderboard, null, true, 'America/New_York');
   const eveningJob = new CronJob('0 0 20 * * *', postLeaderboard, null, true, 'America/New_York');
   
+  // Schedule milestone checks every 15 minutes
+  const milestoneJob = new CronJob('0 */15 * * * *', checkMilestones, null, true, 'America/New_York');
+  
   console.log('📅 Scheduled jobs:');
   console.log(`- Morning leaderboard: ${morningJob.nextDate().toString()}`);
   console.log(`- Evening leaderboard: ${eveningJob.nextDate().toString()}`);
+  console.log(`- Milestone checks: ${milestoneJob.nextDate().toString()}`);
   
-  // Verify database connection by testing a simple query
+  // Verify database connections by testing simple queries
   try {
-    const test = await sql`SELECT 1 as test`;
-    console.log('🔌 Connected to database successfully');
+    const warehouseTest = await sql`SELECT 1 as test`;
+    console.log('🔌 Connected to warehouse database successfully');
+    
+    const milestoneTest = await milestoneDb`SELECT 1 as test`;
+    console.log('🔌 Connected to milestone database successfully');
   } catch (error) {
     console.error('Database connection error:', error);
   }
+  
+  // Run the first milestone check immediately
+  console.log('Running initial milestone check...');
+  await checkMilestones();
 })();

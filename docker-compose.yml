@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: scrapyard_user
+      POSTGRES_PASSWORD: scrapyard_password
+      POSTGRES_DB: scrapyard_milestones
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data: 
