@@ -1,0 +1,13 @@
+node_modules
+Dockerfile*
+docker-compose*
+.dockerignore
+.git
+.gitignore
+README.md
+LICENSE
+.vscode
+.idea
+coverage*
+# Ignore .env files and use Docker environment variables instead
+.env* 

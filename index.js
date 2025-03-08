@@ -109,7 +109,6 @@ WHERE summary.new_sign_ups_past_12_hours > 0
 ORDER BY
   summary.new_sign_ups_past_12_hours DESC,
   summary.event_name ASC
-LIMIT 25;
 `;
 
 /**
@@ -119,7 +118,7 @@ LIMIT 25;
 async function fetchLeaderboardData() {
   try {
     // Using the unsafe method to execute raw SQL
-    const result = await sql.unsafe(LEADERBOARD_QUERY);
+    const result = await sql(LEADERBOARD_QUERY);
     return result;
   } catch (error) {
     console.error('Error fetching leaderboard data:', error);
@@ -198,7 +197,6 @@ function formatLeaderboardMessage(data) {
     const topEventsText = topEvents.map((event, index) => {
       const displayRank = index + 1; // Use array index + 1 for emoji lookup
       const rank = event.leaderboard_rank; // Keep the actual rank for debugging
-      console.log(`Position: ${displayRank}, Actual Rank: ${rank}, Type: ${typeof rank}, Emoji: ${rankEmojis[displayRank]}`);
       const rankDisplay = rankEmojis[displayRank] || `${rank}.`;
       // Keep the full name for top 10
       const name = event.event_name;
