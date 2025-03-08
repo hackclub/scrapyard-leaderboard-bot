@@ -117,8 +117,8 @@ ORDER BY
  */
 async function fetchLeaderboardData() {
   try {
-    // Using the unsafe method to execute raw SQL
-    const result = await sql(LEADERBOARD_QUERY);
+    // Execute the prepared query directly
+    const result = await LEADERBOARD_QUERY;
     return result;
   } catch (error) {
     console.error('Error fetching leaderboard data:', error);
