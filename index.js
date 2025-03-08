@@ -1,8 +1,8 @@
 import { App } from '@slack/bolt';
 import { CronJob } from 'cron';
-import { postgres } from 'bun:postgres';
+import { SQL } from "bun";
 import { format } from 'date-fns';
-import { utcToZonedTime } from 'date-fns-tz';
+import { formatInTimeZone } from 'date-fns-tz';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -16,9 +16,9 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
-// Configure PostgreSQL client
-const db = postgres({
-  url: process.env.WAREHOUSE_DB_URL,
+// Configure PostgreSQL connection manually
+const sql = new SQL({
+  url: process.env.WAREHOUSE_DB_URL
 });
 
 // Define SQL query for the leaderboard
@@ -118,8 +118,8 @@ LIMIT 25;
  */
 async function fetchLeaderboardData() {
   try {
-    // Using raw SQL to execute the complex query
-    const result = await db`${LEADERBOARD_QUERY}`;
+    // Using the unsafe method to execute raw SQL
+    const result = await sql.unsafe(LEADERBOARD_QUERY);
     return result;
   } catch (error) {
     console.error('Error fetching leaderboard data:', error);
@@ -157,8 +157,7 @@ function formatLeaderboardMessage(data) {
 
   // Format the current time in ET
   const now = new Date();
-  const estTime = utcToZonedTime(now, 'America/New_York');
-  const formattedTime = format(estTime, 'MMMM d, yyyy h:mm a zzz');
+  const formattedTime = formatInTimeZone(now, 'America/New_York', 'MMMM d, yyyy h:mm a zzz');
 
   // Create the header section
   const blocks = [
@@ -166,7 +165,7 @@ function formatLeaderboardMessage(data) {
       type: "header",
       text: {
         type: "plain_text",
-        text: "🏆 Scrapyard Leaderboard",
+        text: "🏆 New sign-ups in past 12 hours",
         emoji: true
       }
     },
@@ -174,23 +173,100 @@ function formatLeaderboardMessage(data) {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Top events by new sign-ups in the past 12 hours*\n_Updated: ${formattedTime}_`
+        text: "Top 10 by new sign-ups:"
       }
-    },
-    {
-      type: "divider"
     }
   ];
 
-  // Add each event to the blocks
-  data.forEach((event) => {
+  // Top 10 events - one row per event for better visibility
+  const topEvents = data.slice(0, 10);
+  if (topEvents.length > 0) {
+    // Emoji number mapping
+    const rankEmojis = {
+      1: ":one:",
+      2: ":two:",
+      3: ":three:",
+      4: ":four:",
+      5: ":five:",
+      6: ":six:",
+      7: ":seven:",
+      8: ":eight:",
+      9: ":nine:",
+      10: ":keycap_ten:"
+    };
+    
+    const topEventsText = topEvents.map((event, index) => {
+      const displayRank = index + 1; // Use array index + 1 for emoji lookup
+      const rank = event.leaderboard_rank; // Keep the actual rank for debugging
+      console.log(`Position: ${displayRank}, Actual Rank: ${rank}, Type: ${typeof rank}, Emoji: ${rankEmojis[displayRank]}`);
+      const rankDisplay = rankEmojis[displayRank] || `${rank}.`;
+      // Keep the full name for top 10
+      const name = event.event_name;
+      return `${rankDisplay} *${name}* · ${event.new_sign_ups_past_12_hours}↑ · ${event.total_sign_ups}:bust_in_silhouette:`;
+    }).join('\n');
+    
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*#${event.leaderboard_rank}. ${event.event_name}*\n${event.new_sign_ups_past_12_hours} new sign-ups in the past 12 hours\n${event.total_sign_ups} total sign-ups (Global rank: #${event.overall_rank})`
+        text: topEventsText
       }
     });
+  }
+  
+  // Remaining events in compact format (11-25)
+  const remainingEvents = data.slice(10, 25);
+  if (remainingEvents.length > 0) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "Other events with new sign-ups:"
+      }
+    });
+    
+    // Group remaining events by their new sign-up count
+    const eventsBySignups = {};
+    remainingEvents.forEach(event => {
+      const signups = event.new_sign_ups_past_12_hours;
+      if (!eventsBySignups[signups]) {
+        eventsBySignups[signups] = [];
+      }
+      eventsBySignups[signups].push(event);
+    });
+    
+    // Sort by signup count (descending)
+    const signupCounts = Object.keys(eventsBySignups).sort((a, b) => b - a);
+    
+    const compactRows = signupCounts.map(signupCount => {
+      const eventsWithCount = eventsBySignups[signupCount];
+      const eventNames = eventsWithCount.map(event => {
+        // Remove "Scrapyard" prefix for the compact view
+        const name = event.event_name.replace('Scrapyard ', '');
+        return `*${name}* (${event.total_sign_ups})`;
+      }).join(', ');
+      
+      return `• ${signupCount}↑: ${eventNames}`;
+    });
+    
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: compactRows.join('\n')
+      }
+    });
+  }
+  
+  // Add a footer with explanation
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: "Format: New sign-ups↑ · Total sign-ups:bust_in_silhouette: · `/scrapyard-leaderboard` for latest data"
+      }
+    ]
   });
 
   return { blocks };
@@ -249,13 +325,13 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   const eveningJob = new CronJob('0 0 20 * * *', postLeaderboard, null, true, 'America/New_York');
   
   console.log('📅 Scheduled jobs:');
-  console.log(`- Morning leaderboard: ${morningJob.nextDates().toISOString()}`);
-  console.log(`- Evening leaderboard: ${eveningJob.nextDates().toISOString()}`);
+  console.log(`- Morning leaderboard: ${morningJob.nextDate().toString()}`);
+  console.log(`- Evening leaderboard: ${eveningJob.nextDate().toString()}`);
   
   // Verify database connection by testing a simple query
   try {
-    const test = await db`SELECT 1 as test`;
-    console.log('🔌 Connected to database');
+    const test = await sql`SELECT 1 as test`;
+    console.log('🔌 Connected to database successfully');
   } catch (error) {
     console.error('Database connection error:', error);
   }

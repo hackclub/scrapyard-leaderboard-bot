@@ -21,8 +21,8 @@ The following environment variables need to be set in the `.env` file:
 - `WAREHOUSE_DB_URL`: PostgreSQL database connection URL
 - `SLACK_BOT_TOKEN`: Bot token starting with `xoxb-`
 - `SLACK_SIGNING_SECRET`: Signing secret for your Slack app
-- `SLACK_APP_TOKEN`: App-level token starting with `xapp-`
-- `SLACK_CHANNEL`: The channel where the leaderboard will be posted (default: `#scrapyard`)
+- `SLACK_APP_TOKEN`: App-level token starting with `xapp-` (for Socket Mode)
+- `SLACK_CHANNEL`: The channel where the leaderboard will be posted (specified as a Slack channel ID like "C0864GFN63X")
 
 ## Slack App Configuration
 
