@@ -660,13 +660,13 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   const morningJob = new CronJob('0 0 8 * * *', postLeaderboard, null, true, 'America/New_York');
   const eveningJob = new CronJob('0 0 20 * * *', postLeaderboard, null, true, 'America/New_York');
   
-  // Schedule milestone checks every 15 minutes
-  const milestoneJob = new CronJob('0 */15 * * * *', checkMilestones, null, true, 'America/New_York');
+  // Schedule milestone checks every 1 minute
+  const milestoneJob = new CronJob('* * * * *', checkMilestones, null, true, 'America/New_York');
   
   console.log('📅 Scheduled jobs:');
   console.log(`- Morning leaderboard: ${morningJob.nextDate().toString()}`);
   console.log(`- Evening leaderboard: ${eveningJob.nextDate().toString()}`);
-  console.log(`- Milestone checks: ${milestoneJob.nextDate().toString()}`);
+  console.log(`- Milestone checks: Every minute`);
   console.log(`All jobs will stop after the global event start: ${GLOBAL_EVENT_START.toISOString()}`);
   
   // Verify database connections by testing simple queries
