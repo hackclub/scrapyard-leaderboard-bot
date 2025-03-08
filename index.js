@@ -22,7 +22,7 @@ const sql = new SQL({
 });
 
 // Define SQL query for the leaderboard
-const LEADERBOARD_QUERY = `
+const LEADERBOARD_QUERY = sql`
 WITH summary AS (
   SELECT
     -- Group by event_name so each row is a single event's stats
@@ -295,6 +295,11 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   await ack();
   
   try {
+    // Log the user who triggered the command
+    const userId = command.user_id;
+    const username = command.user_name;
+    console.log(`Slash command triggered by user: ${username} (${userId}) at ${new Date().toISOString()}`);
+    
     const data = await fetchLeaderboardData();
     const message = formatLeaderboardMessage(data);
     
