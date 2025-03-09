@@ -355,23 +355,23 @@ function getNextMilestone(totalRegistrations) {
 /**
  * Formats a congratulatory message for an event that reached a milestone
  * @param {string} eventName - The name of the event
- * @param {number} currentCount - The exact current number of signups
+ * @param {number} milestoneCount - The milestone this count falls into
  * @returns {Object} A formatted Slack message
  */
-function formatMilestoneMessage(eventName, currentCount) {
+function formatMilestoneMessage(eventName, milestoneCount) {
   let emoji;
   
-  // Select emoji based on signup count
-  if (currentCount >= 100) {
+  // Select emoji based on milestone count
+  if (milestoneCount >= 100) {
     emoji = "🚀";
-  } else if (currentCount >= 50) {
+  } else if (milestoneCount >= 50) {
     emoji = "🔥";
   } else {
     emoji = "🎉";
   }
   
-  // Simple, direct message format with the exact current count
-  const message = `*${eventName}* just hit *${currentCount} signups*!`;
+  // Simple, direct message format with the milestone count instead of current count
+  const message = `*${eventName}* just hit *${milestoneCount} signups*!`;
   
   return {
     blocks: [
@@ -383,7 +383,7 @@ function formatMilestoneMessage(eventName, currentCount) {
         }
       }
     ],
-    text: `${eventName} reached ${currentCount} signups!` // Fallback text for notifications
+    text: `${eventName} reached ${milestoneCount} signups!` // Fallback text for notifications
   };
 }
 
@@ -557,15 +557,15 @@ async function checkMilestones() {
         // Notify if we crossed a milestone
         if (shouldNotify && currentCount >= 10) {
           try {
-            // Post the milestone message with the EXACT current count, not the milestone
-            const message = formatMilestoneMessage(eventName, currentCount);
+            // Post the milestone message with the milestone value, not the current count
+            const message = formatMilestoneMessage(eventName, currentMilestone);
             
             await app.client.chat.postMessage({
               channel: process.env.SLACK_CHANNEL,
               ...message
             });
             
-            console.log(`Posted milestone for ${eventName}: ${currentCount} signups (crossed milestone: ${currentMilestone})`);
+            console.log(`Posted milestone for ${eventName}: reached ${currentMilestone} signups milestone (actual count: ${currentCount})`);
             
             // Update our tracking record with the new milestone and always update the slug
             await milestoneDb`
