@@ -658,7 +658,7 @@ app.command('/scrapyard-leaderboard', async ({ command, ack, respond }) => {
   // Schedule leaderboard posts at 8am and 8pm ET
   // Note: Server time should be set to ET, or TZ env var should be set to America/New_York
   const morningJob = new CronJob('0 0 8 * * *', postLeaderboard, null, true, 'America/New_York');
-  const eveningJob = new CronJob('0 28 20 * * *', postLeaderboard, null, true, 'America/New_York');
+  const eveningJob = new CronJob('0 0 20 * * *', postLeaderboard, null, true, 'America/New_York');
   
   // Schedule milestone checks every 1 minute
   const milestoneJob = new CronJob('* * * * *', checkMilestones, null, true, 'America/New_York');
