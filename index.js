@@ -10,7 +10,7 @@ dotenv.config();
 
 // Global cutoff timestamp - March 15, 2024 at 12:00 in UTC-12 (earliest timezone)
 // This is March 16, 2024 at 00:00 UTC (midnight)
-const GLOBAL_EVENT_START = new Date('2024-03-16T00:00:00Z');
+const GLOBAL_EVENT_START = new Date('2025-03-16T00:00:00Z');
 
 // Configure Slack app
 const app = new App({
